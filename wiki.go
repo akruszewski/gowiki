@@ -117,7 +117,7 @@ import (
 )
 
 // TODO: move it to separate yaml file
-var WikiPath = "/Users/adriankruszewski/tmp/"
+var WikiPath = os.Getenv("WIKIPATH")
 
 type Settings struct {
 	GitUrl    string `json:"git_url"`
@@ -191,6 +191,13 @@ TODO:
     add generatePrivateKey function
     add getPublicKey function
 */
+
+// check if env vars are setup corectly, otherwise set defaults
+func init() {
+	if WikiPath == "" {
+		WikiPath = "/Users/adriankruszewski/tmp/"
+	}
+}
 
 func main() {
 	r := httprouter.New()
@@ -280,11 +287,8 @@ func PageListHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Param
 		http.Error(rw, "Can't load page list.", http.StatusInternalServerError)
 	}
 	// TODO: figure out why this range didn't work
-	//for _, file := range files {
-	//    pages = append(pages, file.Name())
-	//}}
-	for i := 0; i < len(files); i++ {
-		fileName := files[i].Name()
+	for _, file := range files {
+		fileName := file.Name()
 		if strings.HasSuffix(fileName, ".wiki") {
 			pages = append(pages, strings.TrimSuffix(fileName, ".wiki"))
 		}

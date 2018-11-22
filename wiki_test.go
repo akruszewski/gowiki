@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -33,26 +36,37 @@ var testCases = []struct {
 	},
 }
 
-func TestPage(t *testing.T) {
-	var (
-		err    error
-		pages  []Page
-		tmp    Page
-		tmp_js []byte
-	)
+func tearUp() {
+	for _, page := range testCases {
+		_ = ioutil.WriteFile(
+			WikiPath+page.title+".wiki",
+			[]byte(page.document),
+			0600,
+		)
+	}
+}
 
-	// TODO: create tmp folder for tests
+func tearDown() {
+	for _, page := range testCases {
+		_ = os.Remove(WikiPath + page.title + ".wiki")
+	}
+}
 
-	// Test save page method (for page file creation)
+// Test .save Page type method (for Page file creation)
+func TestSavePage(t *testing.T) {
 	for _, test := range testCases {
-		tmp = Page{Title: test.title, Document: test.document}
-		err = tmp.save()
+		tmp := Page{Title: test.title, Document: test.document}
+		err := tmp.save()
 		if err != nil {
 			t.Errorf("%+v.save() - error occurs: %v", tmp, err)
 		}
 	}
+	tearDown()
+}
 
-	// Test loadPage function (for page file read)
+// Test loadPage function (for Page file read)
+func TestLoadPage(t *testing.T) {
+	tearUp()
 	for _, test := range testCases {
 		tmp, err := loadPage(test.title)
 		if err != nil {
@@ -66,36 +80,41 @@ func TestPage(t *testing.T) {
 				tmp.Document,
 			)
 		}
-		pages = append(pages, *tmp)
 	}
+	tearDown()
+}
 
-	// Test .toJSON page struct method
-	for i, test := range testCases {
-		tmp_js, err = pages[i].toJSON()
-		if err != nil || bytes.Compare(tmp_js, test.json) != 0 {
-			t.Errorf("Page%v(\"%v\") - error occurs: %v", pages[i], test.title, err)
-		}
-	}
-
-	// Test .fromJSON page struct method
-	for i, test := range testCases {
-		err = tmp.fromJSON(test.json)
-		if err != nil || strings.Compare(tmp.Document, test.document) != 0 {
-			t.Errorf("Page%v(\"%v\") - error occurs: %v", pages[i], test.title, err)
-		}
-	}
-
-	// Test .fromJSON page struct method
-	for i, test := range testCases {
-		err = tmp.fromJSON(test.json)
-		if err != nil || strings.Compare(tmp.Document, test.document) != 0 {
-			t.Errorf("Page%v(\"%v\") - error occurs: %v", pages[i], test.title, err)
-		}
-	}
-
-	// Test removePage function (for page file remove)
+// Test .toJSON Page type method
+func TestToJsonPage(t *testing.T) {
+	tearUp()
 	for _, test := range testCases {
-		err = removePage(test.title)
+		tmp, _ := loadPage(test.title)
+		tmp_js, err := tmp.toJSON()
+		if err != nil || bytes.Compare(tmp_js, test.json) != 0 {
+			t.Errorf("Page%v(\"%v\") - error occurs: %v", tmp, test.title, err)
+		}
+	}
+	tearDown()
+}
+
+// Test .fromJSON Page type method
+func TestFromJsonPage(t *testing.T) {
+	tearUp()
+	for _, test := range testCases {
+		tmp, _ := loadPage(test.title)
+		err := tmp.fromJSON(test.json)
+		if err != nil || strings.Compare(tmp.Document, test.document) != 0 {
+			t.Errorf("Page%v(\"%v\") - error occurs: %v", tmp, test.title, err)
+		}
+	}
+	tearDown()
+}
+
+// Test removePage function (for page file remove)
+func TestRemovePage(t *testing.T) {
+	tearUp()
+	for _, test := range testCases {
+		err := removePage(test.title)
 		if err != nil {
 			t.Errorf(
 				"removePage(%v) != nil, error message: %v",
@@ -107,45 +126,45 @@ func TestPage(t *testing.T) {
 
 }
 
-//Test http view handlers.
-func TestHandlers(t *testing.T) {
-	var (
-		ps          = httprouter.Params{httprouter.Param{Key: "title", Value: "test_index"}}
-		newDocument = []byte(`{"title":"test_index","document":"asd","updated":""}`)
-	)
-
-	//Test PageUpdateHandler http view function.
+//Test PageUpdateHandler http view function.
+func TestPageUpdateHandler(t *testing.T) {
+	tearUp()
 
 	//Test creating new page.
+	for _, test := range testCases {
+		ps := httprouter.Params{httprouter.Param{Key: "title", Value: test.title}}
+		req, err := http.NewRequest(
+			"POST",
+			fmt.Sprintf("http://localhost:8080/%s", test.title),
+			bytes.NewBuffer(test.json),
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		PageUpdateHandler(w, req, ps)
+		if w.Code != 200 {
+			t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
+		}
+		if !bytes.Contains(w.Body.Bytes(), test.json) {
+			t.Error("Response body is different from expected one!")
+		}
+	}
+
+	//Test updating new page.
+	ps := httprouter.Params{httprouter.Param{Key: "title", Value: testCases[0].title}}
+	newDocument := []byte(`{"title":"test_index","document":"asd","updated":""}`)
 	req, err := http.NewRequest(
 		"POST",
-		"http://localhost:8080/test_index",
-		bytes.NewBuffer(testCases[0].json),
+		fmt.Sprintf("http://localhost:8080/%s", testCases[0].title),
+		bytes.NewBuffer(newDocument),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	PageUpdateHandler(w, req, ps)
-	if w.Code != 200 {
-		t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
-	}
-	if !bytes.Contains(w.Body.Bytes(), testCases[0].json) {
-		t.Error("Response body is different from expected one!")
-	}
-
-	//Test updating existing page.
-	req, err = http.NewRequest(
-		"POST",
-		"http://localhost:8080/test_index",
-		bytes.NewBuffer([]byte(`{"document": "asd"}`)),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
 	PageUpdateHandler(w, req, ps)
 	bd := w.Body.Bytes()
 	if w.Code != 200 {
@@ -157,29 +176,36 @@ func TestHandlers(t *testing.T) {
 	) {
 		t.Errorf("Response body is different from expected one! %s", bd)
 	}
+	tearDown()
+}
 
-	//Test PageGetHandler http view function.
+//Test PageGetHandler http view function.
+func TestPageGetHandler(t *testing.T) {
+	tearUp()
 
 	// Gets existing page.
-	req, err = http.NewRequest(
-		"GET",
-		"http://localhost:8080/test_index",
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	w = httptest.NewRecorder()
-	PageGetHandler(w, req, ps)
-	if w.Code != 200 {
-		t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
-	}
-	if !bytes.Contains(w.Body.Bytes(), newDocument) {
-		t.Error("Response body is different from expected one!")
+	for _, test := range testCases {
+		ps := httprouter.Params{httprouter.Param{Key: "title", Value: test.title}}
+		req, err := http.NewRequest(
+			"GET",
+			fmt.Sprintf("http://localhost:8080/%s", test.title),
+			nil,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		PageGetHandler(w, req, ps)
+		if w.Code != 200 {
+			t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
+		}
+		if !bytes.Contains(w.Body.Bytes(), test.json) {
+			t.Error("Response body is different from expected one!")
+		}
 	}
 
 	// Gets not existing page.
-	req, err = http.NewRequest(
+	req, err := http.NewRequest(
 		"GET",
 		"http://localhost:8080/test_not_existing",
 		nil,
@@ -187,7 +213,7 @@ func TestHandlers(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	PageGetHandler(
 		w,
 		req,
@@ -196,9 +222,13 @@ func TestHandlers(t *testing.T) {
 	if w.Code != 404 {
 		t.Errorf("Expected 404 HTTP status code, gets %d", w.Code)
 	}
+	tearDown()
+}
 
-	//Test PageListHandler
-	req, err = http.NewRequest(
+//Test PageListHandler http view function.
+func TestPageListHandler(t *testing.T) {
+	tearUp()
+	req, err := http.NewRequest(
 		"GET",
 		"http://localhost:8080/",
 		nil,
@@ -206,32 +236,39 @@ func TestHandlers(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	PageListHandler(w, req, httprouter.Params{})
 	if w.Code != 200 {
 		t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`["test_index"]`)) {
-		t.Error("Response body is different from expected one!")
+	bd := w.Body.Bytes()
+	if !bytes.Contains(bd, []byte(`["test_index 2","test_index.3","test_index"]`)) {
+		t.Errorf("Response body is different (%s) from expected one!", bd)
 	}
+	tearDown()
+}
 
-	//Test PageDeleteHandler
-
+//Test PageDeleteHandler http view function.
+func TestPageDeleteHandler(t *testing.T) {
+	tearUp()
 	// Deletes existing page.
-	req, err = http.NewRequest(
-		"DELETE",
-		"http://localhost:8080/test_index",
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	w = httptest.NewRecorder()
-	PageDeleteHandler(w, req, ps)
-	if w.Code != 200 {
-		t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
-	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("{\"message\": \"Page removed\"}")) {
-		t.Error("Response body is different from expected one!")
+	for _, test := range testCases {
+		ps := httprouter.Params{httprouter.Param{Key: "title", Value: test.title}}
+		req, err := http.NewRequest(
+			"DELETE",
+			fmt.Sprintf("http://localhost:8080/%s", test.title),
+			nil,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		PageDeleteHandler(w, req, ps)
+		if w.Code != 200 {
+			t.Errorf("Expected 200 HTTP status code, gets %d", w.Code)
+		}
+		if !bytes.Contains(w.Body.Bytes(), []byte("{\"message\": \"Page removed\"}")) {
+			t.Error("Response body is different from expected one!")
+		}
 	}
 }
