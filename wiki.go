@@ -106,17 +106,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
-	"strings"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/urfave/cli"
 	git "gopkg.in/src-d/go-git.v4"
-	gitObject "gopkg.in/src-d/go-git.v4/plumbing/object"
 	//    "gopkg.in/yaml.v2"
 )
 
@@ -128,20 +125,13 @@ type Settings struct {
 	PublicKey string `json:"public_key"`
 }
 
-// Entry for wiki log functionality
-type WikiLogEntry struct {
-	Commit  string    `json:"commit"`
-	Message string    `json:"message"`
-	Date    time.Time `json:"date"`
-}
-
 // Page is singe wiki page consisting of Title and Document
 type Page struct {
-	Title    string         `json:"title"`
-	Document string         `json:"document"`
-	Updated  time.Time      `json:"updated"`
-	Message  string         `json:"message"`
-	Log      []WikiLogEntry `json:"log"`
+	Title    string     `json:"title"`
+	Document string     `json:"document"`
+	Updated  time.Time  `json:"updated"`
+	Message  string     `json:"message"`
+	Log      []LogEntry `json:"log"`
 }
 
 // Saves Document file in WikiPath with Page Title and '.wiki' suffix
@@ -155,49 +145,28 @@ func (p *Page) save() error {
 
 // Commits Page to repo
 func (p *Page) commit(mssg string, r *git.Repository) error {
-	w, err := r.Worktree()
-	if err != nil {
-		return err
-	}
-	w.Add(p.Title + ".wiki")
-	p.Updated = time.Now()
-	commit, err := w.Commit(mssg, &git.CommitOptions{
-		Author: &gitObject.Signature{
-			Name:  "John Doe",     //TODO: fix name to gets real data
-			Email: "john@doe.org", //TODO: fix email to gets real data
-			When:  p.Updated,
-		},
-	})
-	if err != nil {
-		log.Print(err)
-		return err
-	}
-	p.Log = append(p.Log, WikiLogEntry{
-		Commit:  commit.String(),
-		Message: mssg,
-		Date:    p.Updated},
+	logEntry, err := CommitFile(
+		r,
+		p.Title,
+		mssg,
+		os.Getenv("GIT_USERNAME"),
+		os.Getenv("GIT_EMAIL"),
 	)
+	if err != nil {
+		return err
+	}
+	p.Log = append(p.Log, *logEntry)
 	return nil
 }
 
 // Load Page file commits log
 func (p *Page) loadLog(r *git.Repository) error {
-	cIter, err := GetLogForFileWikiRepo(r, p.Title+".wiki")
+	lg, err := GetFileLog(r, p.Title+".wiki")
 	if err != nil {
 		log.Printf("Can't load commits log for file %s", WikiPath+p.Title)
 		return err
 	}
-	err = cIter.ForEach(func(c *gitObject.Commit) error {
-		p.Log = append(p.Log, WikiLogEntry{
-			Commit:  c.Hash.String(),
-			Message: c.Message,
-			Date:    c.Author.When,
-		})
-		return nil
-	})
-	if err != nil {
-		return err
-	}
+	p.Log = append(p.Log, lg...)
 	return nil
 }
 
@@ -211,7 +180,7 @@ func (p *Page) toJSON() ([]byte, error) {
 	return js, nil
 }
 
-// Creates Page Docuemnt from given []bytes contains JSON serializable data.
+// Creates Page Document from given []bytes contains JSON serializable data.
 func (p *Page) fromJSON(data []byte) error {
 	err := json.Unmarshal(data, &p)
 	if err != nil {
@@ -234,84 +203,22 @@ func loadPage(title string, r *git.Repository) (*Page, error) {
 }
 
 // Removes Page Document file with given title.
-func removePage(title string) error {
-	return os.Remove(WikiPath + title + ".wiki")
+func removePage(title string, r *git.Repository) error {
+	err := os.Remove(WikiPath + title + ".wiki")
+	if err != nil {
+		return err
+	}
+	_, err = CommitFile(
+		r,
+		title,
+		fmt.Sprintf("Wiki page %s removed.", title),
+		os.Getenv("GIT_USERNAME"),
+		os.Getenv("GIT_EMAIL"),
+	)
+	return err
 }
 
-// Init git repo for wiki if doesn't exists.
-func InitWikiRepo() (*git.Repository, error) {
-	repo, err := git.PlainInit(WikiPath, false)
-	if err != nil {
-		log.Println("Wiki already exists!")
-		return nil, err
-	}
-	return repo, nil
-}
-
-// Get git repository for wiki.
-func GetWikiRepo() (*git.Repository, error) {
-	repo, err := git.PlainOpen(WikiPath)
-	if err != nil {
-		log.Println("Repository doesn't exists.!")
-		return nil, err
-	}
-	return repo, nil
-}
-
-// Get log for given repository
-func GetLogWikiRepo(r *git.Repository) (gitObject.CommitIter, error) {
-	ref, err := r.Head()
-	if err != nil {
-		log.Println("Can't fetch repository HEAD")
-		return nil, err
-	}
-	cIter, err := r.Log(&git.LogOptions{From: ref.Hash()})
-	if err != nil {
-		log.Println("Can't get repository log")
-		return nil, err
-	}
-	return cIter, nil
-}
-
-// Get log for given repository for given file
-func GetLogForFileWikiRepo(r *git.Repository, s string) (gitObject.CommitIter, error) {
-	ref, err := r.Head()
-	if err != nil {
-		log.Println("Can't fetch repository HEAD")
-		return nil, err
-	}
-	log.Print(s)
-	cIter, err := r.Log(&git.LogOptions{From: ref.Hash(), FileName: &s})
-	if err != nil {
-		log.Println("Can't get repository log for given file.")
-		return nil, err
-	}
-	return cIter, nil
-}
-
-func RunServer() {
-	r := httprouter.New()
-
-	r.GET("/api/wiki_log/", LogHandler)
-	r.GET("/api/wiki/:title/log/", PageLogHandler)
-	//    r.GET("/api/wiki/:title/:commit_id", PageCommitHandler)
-
-	r.GET("/api/wiki/:title", PageGetHandler)
-	r.POST("/api/wiki/:title", PageUpdateHandler)
-	r.DELETE("/api/wiki/:title", PageDeleteHandler)
-
-	r.GET("/api/wiki/", PageListHandler)
-	//
-	//    r.GET("/api/settings/", SettingsGetHandler)
-	//    r.POST("/api/settings/", SettingsUpdateHandler)
-	//
-	//    r.GET("/api/sync_wiki/", SyncWikiHandler)
-
-	log.Println("Starting server on :8080")
-	http.ListenAndServe(":8080", r)
-}
-
-// check if env vars are setup corectly, otherwise set defaults
+// check if env vars are setup correctly, otherwise set defaults
 func init() {
 	if WikiPath == "" {
 		WikiPath = "/Users/adriankruszewski/tmp/"
@@ -328,7 +235,7 @@ func main() {
 			Usage:   "Init Wiki git repository.",
 			Action: func(c *cli.Context) error {
 				log.Print("Initializing git repo in ", WikiPath)
-				_, err := InitWikiRepo()
+				_, err := InitWiki()
 				if err != nil {
 					os.Exit(-1)
 				}
@@ -352,153 +259,3 @@ func main() {
 	}
 
 }
-
-func LogHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := GetWikiRepo()
-	if err != nil {
-		http.Error(rw, "Wiki isn't configured!", http.StatusInternalServerError)
-		return
-	}
-	log, err := GetLogWikiRepo(rep)
-	if err != nil {
-		http.Error(rw, "Can't fetch Wiki log", http.StatusInternalServerError)
-	}
-
-	var res []WikiLogEntry
-	err = log.ForEach(func(c *gitObject.Commit) error {
-		res = append(res, WikiLogEntry{
-			Commit:  c.Hash.String(),
-			Message: c.Message,
-			Date:    c.Author.When,
-		})
-		return nil
-	})
-	js, err := json.Marshal(res)
-	rw.Write(js)
-}
-
-func PageLogHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := GetWikiRepo()
-	if err != nil {
-		http.Error(rw, "Wiki isn't configured!", http.StatusInternalServerError)
-		return
-	}
-	lg, err := GetLogForFileWikiRepo(rep, p.ByName("title")+".wiki")
-	if err != nil {
-		http.Error(rw, "Can't fetch log for Page.", http.StatusInternalServerError)
-	}
-
-	var res []WikiLogEntry
-	err = lg.ForEach(func(c *gitObject.Commit) error {
-		res = append(res, WikiLogEntry{
-			Commit:  c.Hash.String(),
-			Message: c.Message,
-			Date:    c.Author.When,
-		})
-		return nil
-	})
-	js, err := json.Marshal(res)
-	rw.Write(js)
-}
-
-//
-//func PageCommitHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
-//
-
-// Http view handler for retrieving wiki page
-func PageGetHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	title := p.ByName("title")
-	rep, err := GetWikiRepo()
-	if err != nil {
-		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
-	}
-	page, err := loadPage(title, rep)
-	if err != nil {
-		http.Error(rw, "Page not found.", http.StatusNotFound)
-		return
-	}
-	js, err := page.toJSON()
-	if err != nil {
-		http.Error(rw, "Decoding error", http.StatusInternalServerError)
-		return
-	}
-	rw.Header().Set("Content-Type", "application/json")
-	rw.Write(js)
-}
-
-// Http view handler for updating wiki page
-func PageUpdateHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	title := p.ByName("title")
-	reqBody, err := ioutil.ReadAll(r.Body)
-	page := Page{Title: title}
-
-	err = page.fromJSON(reqBody)
-	if err != nil {
-		http.Error(rw, "Decoding error", http.StatusInternalServerError)
-		return
-	}
-
-	rep, err := GetWikiRepo()
-	if err != nil {
-		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
-	}
-	page.save()
-	page.commit(page.Message, rep)
-	page.loadLog(rep)
-
-	js, err := page.toJSON()
-	if err != nil {
-		http.Error(rw, "Encoding error", http.StatusInternalServerError)
-		return
-	}
-	rw.Header().Set("Content-Type", "application/json")
-	rw.Write(js)
-}
-
-// Http view handler for deleting wiki page
-func PageDeleteHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	err := removePage(p.ByName("title"))
-	if err != nil {
-		log.Printf("Error deleting page: %v", err)
-		http.Error(rw, "can't delete page", http.StatusBadRequest)
-		return
-	}
-	rw.Header().Set("Content-Type", "application/json")
-	rw.Write([]byte("{\"message\": \"Page removed\"}"))
-}
-
-// Http view handler for listing wiki pages
-func PageListHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	files, err := ioutil.ReadDir(WikiPath)
-	var pages []string
-	if err != nil {
-		log.Printf("Error listing pages: %v", err)
-		http.Error(rw, "Can't load page list.", http.StatusInternalServerError)
-	}
-	// TODO: figure out why this range didn't work
-	for _, file := range files {
-		fileName := file.Name()
-		if strings.HasSuffix(fileName, ".wiki") {
-			pages = append(pages, strings.TrimSuffix(fileName, ".wiki"))
-		}
-	}
-	js, err := json.Marshal(pages)
-	if err != nil {
-		log.Printf("Error marshaling pages: %v", err)
-		http.Error(rw, "Can't load page list.", http.StatusInternalServerError)
-		return
-	}
-	rw.Header().Set("Content-Type", "application/json")
-	rw.Write(js)
-}
-
-//
-//func SettingsGetHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
-//
-//func SettingsUpdateHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
-//
-//func SyncWikiHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
