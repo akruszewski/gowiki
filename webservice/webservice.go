@@ -1,4 +1,4 @@
-package main
+package webservice
 
 import (
 	"encoding/json"
@@ -7,61 +7,71 @@ import (
 	"net/http"
 	"strings"
 
+	page "github.com/akruszewski/awiki/page/git"
+	auth "github.com/akruszewski/awiki/webservice/auth/jwt"
 	"github.com/julienschmidt/httprouter"
 )
+
+// TODO: move to settings
+var WikiPath = "/Users/adriankruszewski/tmp/"
 
 func RunServer() {
 	r := httprouter.New()
 
-	r.GET("/api/wiki_log/", LogHandler)
-	r.GET("/api/wiki/:title/log/", PageLogHandler)
-	//    r.GET("/api/wiki/:title/:commit_id", PageCommitHandler)
+	r.GET("/api/wiki_log/", wikiLog)
+	r.GET("/api/wiki/:title/log/", pageLog)
+	//    r.GET("/api/wiki/:title/:commit_id", pageCommit)
 
-	r.GET("/api/wiki/:title", PageGetHandler)
-	r.POST("/api/wiki/:title", PageUpdateHandler)
-	r.DELETE("/api/wiki/:title", PageDeleteHandler)
+	r.GET("/api/wiki/:title", pageGet)
+	r.POST("/api/wiki/:title", pageUpdate)
+	r.DELETE("/api/wiki/:title", pageDelete)
 
-	r.GET("/api/wiki/", PageListHandler)
-	//
-	//    r.GET("/api/settings/", SettingsGetHandler)
-	//    r.POST("/api/settings/", SettingsUpdateHandler)
-	//
-	//    r.GET("/api/sync_wiki/", SyncWikiHandler)
+	r.GET("/api/wiki/", pageList)
+
+	r.GET("/api/auth/login/", login)
+	r.GET("/api/auth/logout/", logout)
+	r.GET("/api/auth/refresh-token", refreshToken)
 
 	log.Println("Starting server on :8080")
 	http.ListenAndServe(":8080", r)
 }
 
-func LogHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := GetWiki(WikiPath)
+// Http view handler for retrieving wiki log
+func wikiLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	rep, err := page.Wiki(WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki isn't configured!", http.StatusInternalServerError)
 		return
 	}
-	lg, err := GetWikiLog(rep)
+	lg, err := page.WikiLog(rep)
 	if err != nil {
 		http.Error(rw, "Can't fetch Wiki log", http.StatusInternalServerError)
+		return
 	}
 	js, err := json.Marshal(lg)
 	if err != nil {
 		http.Error(rw, "Can't fetch Wiki log", http.StatusInternalServerError)
+		return
 	}
 	rw.Write(js)
 }
 
-func PageLogHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := GetWiki(WikiPath)
+// Http view handler for retrieving page log.
+func pageLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	rep, err := page.Wiki(WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki isn't configured!", http.StatusInternalServerError)
 		return
 	}
-	lg, err := GetFileLog(rep, p.ByName("title")+".wiki")
+	lg, err := page.FileLog(rep, p.ByName("title")+".wiki")
 	if err != nil {
 		http.Error(rw, "Can't fetch log for Page.", http.StatusInternalServerError)
+		return
 	}
 	js, err := json.Marshal(lg)
 	if err != nil {
 		http.Error(rw, "Can't fetch log for Page.", http.StatusInternalServerError)
+		return
 	}
 	rw.Write(js)
 }
@@ -72,18 +82,19 @@ func PageLogHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params
 //
 
 // Http view handler for retrieving wiki page
-func PageGetHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func pageGet(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	title := p.ByName("title")
-	rep, err := GetWiki(WikiPath)
+	rep, err := page.Wiki(WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
+		return
 	}
-	page, err := loadPage(title, rep)
+	page, err := page.Load(title, WikiPath, rep)
 	if err != nil {
 		http.Error(rw, "Page not found.", http.StatusNotFound)
 		return
 	}
-	js, err := page.toJSON()
+	js, err := json.Marshal(page)
 	if err != nil {
 		http.Error(rw, "Decoding error", http.StatusInternalServerError)
 		return
@@ -93,26 +104,26 @@ func PageGetHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params
 }
 
 // Http view handler for updating wiki page
-func PageUpdateHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func pageUpdate(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	title := p.ByName("title")
 	reqBody, err := ioutil.ReadAll(r.Body)
-	page := Page{Title: title}
+	pg := page.Page{Title: title}
 
-	err = page.fromJSON(reqBody)
+	err = json.Unmarshal(reqBody, &pg)
 	if err != nil {
 		http.Error(rw, "Decoding error", http.StatusInternalServerError)
 		return
 	}
 
-	rep, err := GetWiki(WikiPath)
+	rep, err := page.Wiki(WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
+		return
 	}
-	page.save()
-	page.commit(page.Message, rep)
-	page.loadLog(rep)
+	pg.Save(WikiPath, rep)
+	pg.LoadLog(rep, WikiPath)
 
-	js, err := page.toJSON()
+	js, err := json.Marshal(pg)
 	if err != nil {
 		http.Error(rw, "Encoding error", http.StatusInternalServerError)
 		return
@@ -122,12 +133,13 @@ func PageUpdateHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Par
 }
 
 // Http view handler for deleting wiki page
-func PageDeleteHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := GetWiki(WikiPath)
+func pageDelete(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	rep, err := page.Wiki(WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
+		return
 	}
-	err = removePage(p.ByName("title"), rep)
+	err = page.Remove(p.ByName("title"), WikiPath, rep)
 	if err != nil {
 		log.Printf("Error deleting page: %v", err)
 		http.Error(rw, "can't delete page", http.StatusBadRequest)
@@ -138,14 +150,14 @@ func PageDeleteHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Par
 }
 
 // Http view handler for listing wiki pages
-func PageListHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func pageList(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	files, err := ioutil.ReadDir(WikiPath)
 	var pages []string
 	if err != nil {
 		log.Printf("Error listing pages: %v", err)
 		http.Error(rw, "Can't load page list.", http.StatusInternalServerError)
+		return
 	}
-	// TODO: figure out why this range didn't work
 	for _, file := range files {
 		fileName := file.Name()
 		if strings.HasSuffix(fileName, ".wiki") {
@@ -162,12 +174,32 @@ func PageListHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Param
 	rw.Write(js)
 }
 
-//
-//func SettingsGetHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
-//
-//func SettingsUpdateHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
-//
-//func SyncWikiHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
+func login(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	requestUser := new(auth.User)
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(&requestUser)
+
+	responseStatus, token := auth.Login(requestUser)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(responseStatus)
+	w.Write(token)
+}
+
+func refreshToken(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	requestUser := new(auth.User)
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(&requestUser)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(auth.RefreshToken(requestUser))
+}
+
+func logout(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	err := auth.Logout(r)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+}
