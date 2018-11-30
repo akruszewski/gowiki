@@ -10,7 +10,7 @@ import (
 	page "github.com/akruszewski/awiki/page/git"
 	settings "github.com/akruszewski/awiki/settings"
 	"github.com/akruszewski/awiki/webservice"
-	awikiSSH "github.com/akruszewski/awiki/webservice/authentication/ssh"
+	awikiSSH "github.com/akruszewski/awiki/webservice/auth/ssh"
 	"github.com/urfave/cli"
 	//    "gopkg.in/yaml.v2"
 )

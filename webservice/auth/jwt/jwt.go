@@ -6,12 +6,14 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
 
 	settings "github.com/akruszewski/awiki/settings"
 	auth "github.com/akruszewski/awiki/webservice/auth"
+	"github.com/akruszewski/awiki/webservice/auth/redis"
 	jwt "github.com/dgrijalva/jwt-go"
 	jwtRequst "github.com/dgrijalva/jwt-go/request"
 	"golang.org/x/crypto/bcrypt"
@@ -59,19 +61,20 @@ func (backend *JWTAuthenticationBackend) GenerateToken(userUUID string) (string,
 	return tokenString, nil
 }
 
-func (backend *JWTAuthenticationBackend) Authenticate(user, storedUser *auth.User) bool {
+func (backend *JWTAuthenticationBackend) Authenticate(user *auth.User, storedUser *auth.DBUser) bool {
 	return user.Username == storedUser.Username && bcrypt.CompareHashAndPassword(
-		[]byte(storedUser.Password),
+		[]byte(storedUser.Hash),
 		[]byte(user.Password),
 	) == nil
 }
 
-func (backend *JWTAuthenticationBackend) getTokenRemainingValidity(timestamp interface{}) int {
+func (backend *JWTAuthenticationBackend) getTokenRemainingValidity(timestamp interface{}) time.Duration {
 	if validity, ok := timestamp.(float64); ok {
 		tm := time.Unix(int64(validity), 0)
 		remainer := tm.Sub(time.Now())
 		if remainer > 0 {
-			return int(remainer.Seconds() + expireOffset)
+			duration, _ := time.ParseDuration(fmt.Sprintf("%vs", remainer.Seconds()+expireOffset))
+			return duration
 		}
 	}
 	return expireOffset
@@ -79,18 +82,18 @@ func (backend *JWTAuthenticationBackend) getTokenRemainingValidity(timestamp int
 
 func (backend *JWTAuthenticationBackend) Logout(tokenString string, token *jwt.Token) error {
 	redisConn := redis.Connect()
-	return redisConn.SetValue(
+	return redisConn.Set(
 		tokenString,
 		tokenString,
 		backend.getTokenRemainingValidity(token.Claims.(jwt.MapClaims)["exp"]),
-	)
+	).Err()
 }
 
 func (backend *JWTAuthenticationBackend) IsInBlacklist(token string) bool {
 	redisConn := redis.Connect()
-	redisToken, _ := redisConn.GetValue(token)
+	redisToken, err := redisConn.Get(token).Result()
 
-	if redisToken == nil {
+	if err != nil || len(redisToken) < 1 {
 		return false
 	}
 
@@ -98,11 +101,15 @@ func (backend *JWTAuthenticationBackend) IsInBlacklist(token string) bool {
 }
 
 //Logins requestUser by checking it credentials compared to dbUser
-func Login(requestUser, dbUser *auth.User) (int, []byte) {
+func Login(requestUser *auth.User) (int, []byte) {
 	authBackend := InitJWTAuthenticationBackend()
 
-	if authBackend.Authenticate(requestUser, dbUser) {
-		token, err := authBackend.GenerateToken(requestUser.UUID)
+	dbUser, err := auth.LoadUser(requestUser.Username)
+	if err != nil {
+		return http.StatusInternalServerError, []byte("")
+	}
+	if authBackend.Authenticate(requestUser, &dbUser) {
+		token, err := authBackend.GenerateToken(requestUser.Username)
 		if err != nil {
 			return http.StatusInternalServerError, []byte("")
 		} else {
@@ -116,7 +123,7 @@ func Login(requestUser, dbUser *auth.User) (int, []byte) {
 
 func RefreshToken(requestUser *auth.User) []byte {
 	authBackend := InitJWTAuthenticationBackend()
-	token, err := authBackend.GenerateToken(requestUser.UUID)
+	token, err := authBackend.GenerateToken(requestUser.Username)
 	if err != nil {
 		panic(err)
 	}
@@ -148,6 +155,7 @@ func getPrivateKey() *rsa.PrivateKey {
 	if err != nil {
 		panic(err)
 	}
+	defer privateKeyFile.Close()
 
 	pemfileinfo, _ := privateKeyFile.Stat()
 	var size int64 = pemfileinfo.Size()
@@ -157,8 +165,6 @@ func getPrivateKey() *rsa.PrivateKey {
 	_, err = buffer.Read(pembytes)
 
 	data, _ := pem.Decode([]byte(pembytes))
-
-	privateKeyFile.Close()
 
 	privateKeyImported, err := x509.ParsePKCS1PrivateKey(data.Bytes)
 

@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	page "github.com/akruszewski/awiki/page/git"
-	auth "github.com/akruszewski/awiki/webservice/auth/jwt"
+	"github.com/akruszewski/awiki/webservice/auth"
+	"github.com/akruszewski/awiki/webservice/auth/jwt"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -179,7 +180,7 @@ func login(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.Decode(&requestUser)
 
-	responseStatus, token := auth.Login(requestUser)
+	responseStatus, token := jwt.Login(requestUser)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(responseStatus)
 	w.Write(token)
@@ -191,11 +192,11 @@ func refreshToken(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	decoder.Decode(&requestUser)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(auth.RefreshToken(requestUser))
+	w.Write(jwt.RefreshToken(requestUser))
 }
 
 func logout(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	err := auth.Logout(r)
+	err := jwt.Logout(r)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
