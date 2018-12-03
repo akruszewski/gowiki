@@ -12,11 +12,7 @@ import (
 	"github.com/akruszewski/awiki/webservice"
 	awikiSSH "github.com/akruszewski/awiki/webservice/auth/ssh"
 	"github.com/urfave/cli"
-	//    "gopkg.in/yaml.v2"
 )
-
-// TODO: move it to separate yaml file
-var WikiPath = os.Getenv("WIKIPATH")
 
 func main() {
 	app := cli.NewApp()
@@ -27,8 +23,8 @@ func main() {
 			Aliases: []string{"i"},
 			Usage:   "Initialize Wiki git repository.",
 			Action: func(c *cli.Context) error {
-				log.Print("Initializing git repo in ", WikiPath)
-				_, err := page.Init(WikiPath)
+				log.Print("Initializing git repo in ", settings.WikiPath)
+				_, err := page.Init(settings.WikiPath)
 				if err != nil {
 					os.Exit(-1)
 				}

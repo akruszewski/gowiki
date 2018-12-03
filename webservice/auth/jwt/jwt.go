@@ -89,7 +89,7 @@ func (backend *JWTAuthenticationBackend) Logout(tokenString string, token *jwt.T
 	).Err()
 }
 
-func (backend *JWTAuthenticationBackend) IsInBlacklist(token string) bool {
+func (backend *JWTAuthenticationBackend) IsInBlockList(token string) bool {
 	redisConn := redis.Connect()
 	redisToken, err := redisConn.Get(token).Result()
 

@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -17,27 +18,28 @@ import (
 func MakeSSHKeyPair(pubKeyPath, privateKeyPath string) error {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't generate private key")
 	}
 
 	// generate and write private key as PEM
 	privateKeyFile, err := os.Create(privateKeyPath)
-	defer privateKeyFile.Close()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't create private key")
 	}
+	defer privateKeyFile.Close()
+
 	privateKeyPEM := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	}
 	if err := pem.Encode(privateKeyFile, privateKeyPEM); err != nil {
-		return err
+		return errors.Wrap(err, "Can't encode private key")
 	}
 
 	// generate and write public key
 	pub, err := ssh.NewPublicKey(&privateKey.PublicKey)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't generate public key")
 	}
 	return ioutil.WriteFile(pubKeyPath, ssh.MarshalAuthorizedKey(pub), 0655)
 }

@@ -3,12 +3,12 @@ package git
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 	"time"
 
 	"github.com/akruszewski/awiki/page"
+	"github.com/pkg/errors"
 	git "gopkg.in/src-d/go-git.v4"
 	gitObject "gopkg.in/src-d/go-git.v4/plumbing/object"
 )
@@ -25,7 +25,7 @@ func (p *Page) Save(wikiPath string, repo *git.Repository) error {
 		0600,
 	)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't save wiki page")
 	}
 	logEntry, err := CommitFile(
 		repo,
@@ -35,7 +35,7 @@ func (p *Page) Save(wikiPath string, repo *git.Repository) error {
 		os.Getenv("GIT_EMAIL"),
 	)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't commit wiki page")
 	}
 	p.Log = append(p.Log, *logEntry)
 	return nil
@@ -45,7 +45,7 @@ func (p *Page) Save(wikiPath string, repo *git.Repository) error {
 func (p *Page) LoadLog(r *git.Repository, wikiPath string) error {
 	lg, err := FileLog(r, p.Title+".wiki")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't load wiki page log")
 	}
 	p.Log = append(p.Log, lg...)
 	return nil
@@ -58,7 +58,7 @@ func Load(title string, wikiPath string, r *git.Repository) (*Page, error) {
 	page := Page{Title: title, Document: string(body)}
 	page.LoadLog(r, wikiPath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Can't load wiki page")
 	}
 	return &page, nil
 }
@@ -67,7 +67,7 @@ func Load(title string, wikiPath string, r *git.Repository) (*Page, error) {
 func Remove(title string, wikiPath string, r *git.Repository) error {
 	err := os.Remove(path.Join(wikiPath, title+".wiki"))
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't remove wiki page")
 	}
 	_, err = CommitFile(
 		r,
@@ -76,7 +76,7 @@ func Remove(title string, wikiPath string, r *git.Repository) error {
 		os.Getenv("GIT_USERNAME"),
 		os.Getenv("GIT_EMAIL"),
 	)
-	return err
+	return errors.Wrap(err, "Can't commit wiki page change")
 }
 
 // Gets log for given file.
@@ -105,16 +105,10 @@ func FileLog(r *git.Repository, s string) (page.Log, error) {
 //TODO: consider other name
 // Commits file with given fileName (without extension) to given repository
 // with commit message as userName with email
-func CommitFile(
-	r *git.Repository,
-	fileName string,
-	message string,
-	userName string,
-	email string,
-) (*page.LogEntry, error) {
+func CommitFile(r *git.Repository, fileName, message, userName, email string) (*page.LogEntry, error) {
 	w, err := r.Worktree()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Can't prepare wiki worktree")
 	}
 	le := page.LogEntry{Message: message}
 	w.Add(fileName + ".wiki")
@@ -128,8 +122,7 @@ func CommitFile(
 	})
 	le.ID = commit.String()
 	if err != nil {
-		log.Print(err)
-		return nil, err
+		return nil, errors.Wrap(err, "Can't commit wiki page change")
 	}
 	return &le, nil
 }
@@ -137,6 +130,9 @@ func CommitFile(
 // Init git repo for wiki if doesn't exists.
 func Init(wikiPath string) (repo *git.Repository, err error) {
 	repo, err = git.PlainInit(wikiPath, false)
+	if err != nil {
+		err = errors.Wrap(err, "Can't init wiki repository")
+	}
 	return
 }
 
@@ -144,7 +140,7 @@ func Init(wikiPath string) (repo *git.Repository, err error) {
 func Wiki(wikiPath string) (repo *git.Repository, err error) {
 	repo, err = git.PlainOpen(wikiPath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Can't get wiki repository")
 	}
 	return repo, nil
 }
@@ -153,11 +149,11 @@ func Wiki(wikiPath string) (repo *git.Repository, err error) {
 func WikiLog(r *git.Repository) (page.Log, error) {
 	ref, err := r.Head()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "cant get wiki repository head")
 	}
 	cIter, err := r.Log(&git.LogOptions{From: ref.Hash()})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Can't get wiki log")
 	}
 	var wikiLog page.Log
 	err = cIter.ForEach(func(c *gitObject.Commit) error {

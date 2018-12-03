@@ -2,13 +2,12 @@ package auth
 
 import (
 	"encoding/json"
-	"errors"
 	"io/ioutil"
-	"log"
 	"strings"
 
 	"github.com/akruszewski/awiki/settings"
 	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -42,12 +41,12 @@ type Authentifier interface {
 func Users() (DBUsers, error) {
 	data, err := ioutil.ReadFile(settings.UserDBPath)
 	if err != nil {
-		return DBUsers{}, err
+		return DBUsers{}, errors.Wrap(err, "Can't read users db")
 	}
 	users := DBUsers{}
 	err = json.Unmarshal(data, &users)
 	if err != nil {
-		return DBUsers{}, err
+		return DBUsers{}, errors.Wrap(err, "Can't load users db")
 	}
 	return users, nil
 }
@@ -56,7 +55,7 @@ func Users() (DBUsers, error) {
 func LoadUser(userName string) (DBUser, error) {
 	users, err := Users()
 	if err != nil {
-		return DBUser{}, err
+		return DBUser{}, errors.Wrap(err, "Can't read user db")
 	}
 	for _, user := range users {
 		if strings.Compare(user.Username, userName) == 0 {
@@ -70,7 +69,6 @@ func LoadUser(userName string) (DBUser, error) {
 func UserExists(userName string) bool {
 	users, err := Users()
 	if err != nil {
-		log.Println(err)
 		return false
 	}
 	for _, user := range users {
@@ -94,7 +92,7 @@ func (u *DBUser) Save(password string) error {
 		bcrypt.DefaultCost,
 	)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Can't save user into db")
 	}
 	u.Hash = hash
 	return nil

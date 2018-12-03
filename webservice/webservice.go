@@ -19,7 +19,6 @@ func RunServer() {
 
 	r.GET("/api/wiki_log/", wikiLog)
 	r.GET("/api/wiki/:title/log/", pageLog)
-	//    r.GET("/api/wiki/:title/:commit_id", pageCommit)
 
 	r.GET("/api/wiki/:title", pageGet)
 	r.POST("/api/wiki/:title", pageUpdate)
@@ -74,11 +73,6 @@ func pageLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	}
 	rw.Write(js)
 }
-
-//
-//func PageCommitHandler(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-//}
-//
 
 // Http view handler for retrieving wiki page
 func pageGet(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
