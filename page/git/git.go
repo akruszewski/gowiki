@@ -45,12 +45,6 @@ func (p *Page) Save(wikiPath string, repo *git.Repository) error {
 func (p *Page) LoadLog(r *git.Repository, wikiPath string) error {
 	lg, err := FileLog(r, p.Title+".wiki")
 	if err != nil {
-		// TODO: use glog
-		log.Printf(
-			"Can't load commits log for file %s, %s",
-			path.Join(wikiPath, p.Title),
-			err,
-		)
 		return err
 	}
 	p.Log = append(p.Log, lg...)
@@ -89,12 +83,10 @@ func Remove(title string, wikiPath string, r *git.Repository) error {
 func FileLog(r *git.Repository, s string) (page.Log, error) {
 	ref, err := r.Head()
 	if err != nil {
-		log.Println("Can't fetch repository HEAD")
 		return nil, err
 	}
 	cIter, err := r.Log(&git.LogOptions{From: ref.Hash(), FileName: &s})
 	if err != nil {
-		log.Println("Can't get repository log for given file.")
 		return nil, err
 	}
 
@@ -145,9 +137,6 @@ func CommitFile(
 // Init git repo for wiki if doesn't exists.
 func Init(wikiPath string) (repo *git.Repository, err error) {
 	repo, err = git.PlainInit(wikiPath, false)
-	if err != nil {
-		log.Println("Wiki already exists!")
-	}
 	return
 }
 
@@ -155,7 +144,6 @@ func Init(wikiPath string) (repo *git.Repository, err error) {
 func Wiki(wikiPath string) (repo *git.Repository, err error) {
 	repo, err = git.PlainOpen(wikiPath)
 	if err != nil {
-		log.Println("Repository doesn't exists.!")
 		return nil, err
 	}
 	return repo, nil
@@ -165,12 +153,10 @@ func Wiki(wikiPath string) (repo *git.Repository, err error) {
 func WikiLog(r *git.Repository) (page.Log, error) {
 	ref, err := r.Head()
 	if err != nil {
-		log.Println("Can't fetch repository HEAD")
 		return nil, err
 	}
 	cIter, err := r.Log(&git.LogOptions{From: ref.Hash()})
 	if err != nil {
-		log.Println("Can't get repository log")
 		return nil, err
 	}
 	var wikiLog page.Log

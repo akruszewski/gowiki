@@ -1,6 +1,7 @@
 package settings
 
 const (
+	WikiPath           = "/Users/adriankruszewski/tmp/"
 	PublicKeyPath      = "/Users/adriankruszewski/go/src/github.com/akruszewski/awiki/.ssh/"
 	PrivateKeyPath     = "/Users/adriankruszewski/go/src/github.com/akruszewski/awiki/.ssh/"
 	JWTExpirationDelta = 3600

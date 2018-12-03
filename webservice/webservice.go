@@ -8,13 +8,11 @@ import (
 	"strings"
 
 	page "github.com/akruszewski/awiki/page/git"
+	"github.com/akruszewski/awiki/settings"
 	"github.com/akruszewski/awiki/webservice/auth"
 	"github.com/akruszewski/awiki/webservice/auth/jwt"
 	"github.com/julienschmidt/httprouter"
 )
-
-// TODO: move to settings
-var WikiPath = "/Users/adriankruszewski/tmp/"
 
 func RunServer() {
 	r := httprouter.New()
@@ -39,7 +37,7 @@ func RunServer() {
 
 // Http view handler for retrieving wiki log
 func wikiLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := page.Wiki(WikiPath)
+	rep, err := page.Wiki(settings.WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki isn't configured!", http.StatusInternalServerError)
 		return
@@ -59,7 +57,7 @@ func wikiLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 // Http view handler for retrieving page log.
 func pageLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := page.Wiki(WikiPath)
+	rep, err := page.Wiki(settings.WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki isn't configured!", http.StatusInternalServerError)
 		return
@@ -85,12 +83,12 @@ func pageLog(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 // Http view handler for retrieving wiki page
 func pageGet(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	title := p.ByName("title")
-	rep, err := page.Wiki(WikiPath)
+	rep, err := page.Wiki(settings.WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
 		return
 	}
-	page, err := page.Load(title, WikiPath, rep)
+	page, err := page.Load(title, settings.WikiPath, rep)
 	if err != nil {
 		http.Error(rw, "Page not found.", http.StatusNotFound)
 		return
@@ -116,13 +114,13 @@ func pageUpdate(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		return
 	}
 
-	rep, err := page.Wiki(WikiPath)
+	rep, err := page.Wiki(settings.WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
 		return
 	}
-	pg.Save(WikiPath, rep)
-	pg.LoadLog(rep, WikiPath)
+	pg.Save(settings.WikiPath, rep)
+	pg.LoadLog(rep, settings.WikiPath)
 
 	js, err := json.Marshal(pg)
 	if err != nil {
@@ -135,12 +133,12 @@ func pageUpdate(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 // Http view handler for deleting wiki page
 func pageDelete(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	rep, err := page.Wiki(WikiPath)
+	rep, err := page.Wiki(settings.WikiPath)
 	if err != nil {
 		http.Error(rw, "Wiki improperly configured.", http.StatusInternalServerError)
 		return
 	}
-	err = page.Remove(p.ByName("title"), WikiPath, rep)
+	err = page.Remove(p.ByName("title"), settings.WikiPath, rep)
 	if err != nil {
 		log.Printf("Error deleting page: %v", err)
 		http.Error(rw, "can't delete page", http.StatusBadRequest)
@@ -152,7 +150,7 @@ func pageDelete(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 // Http view handler for listing wiki pages
 func pageList(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	files, err := ioutil.ReadDir(WikiPath)
+	files, err := ioutil.ReadDir(settings.WikiPath)
 	var pages []string
 	if err != nil {
 		log.Printf("Error listing pages: %v", err)
