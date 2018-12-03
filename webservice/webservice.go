@@ -2,6 +2,7 @@ package webservice
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -30,8 +31,8 @@ func RunServer() {
 	r.GET("/api/auth/logout/", logout)
 	r.GET("/api/auth/refresh-token", refreshToken)
 
-	log.Println("Starting server on :8080")
-	http.ListenAndServe(":8080", r)
+	log.Printf("Starting server on :%v", settings.Port)
+	http.ListenAndServe(fmt.Sprintf(":%v", settings.Port), r)
 }
 
 // Http view handler for retrieving wiki log

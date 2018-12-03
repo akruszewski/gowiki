@@ -10,4 +10,5 @@ const (
 	RedisAddr          = "localhost:6379"
 	RedisPassword      = ""
 	RedisDB            = 0
+	Port               = 8080
 )
